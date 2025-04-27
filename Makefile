@@ -12,12 +12,13 @@ SRCS_ALL = jogo.c cunit_tests.c
 OBJS_ALL = $(SRCS_ALL:.c=.o)
 TEST_FLAGS := -DRUN_TESTS -fprofile-arcs -ftest-coverage
 
-ifeq ($(MAKECMDGOALS), testar)
+JOGO_TARGET = jogo
+TESTAR_TARGET = testar
+
+ifeq ($(MAKECMDGOALS), $(TESTAR_TARGET))
 	CFLAGS += $(TEST_FLAGS)
 endif
 
-JOGO_TARGET = jogo
-TESTAR_TARGET = testar
 
 all: $(JOGO_TARGET)
 
@@ -27,9 +28,9 @@ $(JOGO_TARGET): $(OBJS)
 
 $(TESTAR_TARGET): clean build_test
 	./$(TESTAR_TARGET)
-	@gcov $(SRCS_ALL) > /dev/null
-	@echo "---CODE---"
-	@grep -Hn '#####' *.gcov || echo "Todas as linhas descobertas!"
+	#@gcov $(SRCS_ALL) > /dev/null
+	#@echo "---CODE---"
+	#@grep -Hn '#####' *.gcov || echo "Todas as linhas descobertas!"
 
 # cflags = standard + gcov and define
 build_test: $(OBJS_ALL)

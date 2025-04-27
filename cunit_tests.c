@@ -1,6 +1,27 @@
 #include "cunit/includes/CUnit.h"
 #include "cunit/includes/Basic.h"
+#include <stdio.h>
+#include <string.h>
 #include "jogo.h"
+
+
+// Não consegui testar isto
+/* void test_leinteiro(void){
+    CU_ASSERT_TRUE(leInteiro("1") == 1);
+}
+ */
+
+ void test_leinteiro(void){
+    FILE* temp = tmpfile();
+    fputs("1\n", temp);
+    rewind(temp);
+
+    FILE* original_stdin = stdin;
+    stdin = temp;
+    CU_ASSERT(leInteiro("") == 1);
+    stdin = original_stdin;
+    fclose(temp);
+ }
 
 void test_criar_e_liberar_tabuleiro(void) {
     char **tab = criarTabuleiro(3, 4);
@@ -45,9 +66,16 @@ int call_tests(void){
 
     pSuite = CU_add_suite("Testes Jogo", 0, 0);
 
-    if(CU_add_test(pSuite, "Teste criação tabuleiro", test_criar_e_liberar_tabuleiro) == NULL){
+    if(CU_add_test(pSuite, "Teste ler inteiro", test_leinteiro) == NULL){
         return CU_get_error();
     }
+    /*
+    if(CU_add_test(pSuite, "Teste libertar tabuleiro", test_liberar_tabuleiro) == NULL){
+        return CU_get_error();
+    } */
+    if(CU_add_test(pSuite, "Teste criação tabuleiro", test_criar_e_liberar_tabuleiro) == NULL){
+        return CU_get_error();
+    } 
     if(CU_add_test(pSuite, "Teste preencher tabuleiro", test_preencher_tabuleiro) == NULL){
         return CU_get_error();
     }
