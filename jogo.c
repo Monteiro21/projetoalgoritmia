@@ -34,12 +34,12 @@ bool casasBrancasEstaoConectadas(char **tabuleiro, int linhas, int colunas) {
     if (linhas == 0 || colunas == 0) return true;
     
     Posicao inicio = {-1, -1};
-    int contadorBrancas = 0;
+    int contadorLetras = 0;
     
     for (int i = 0; i < linhas; i++) {
         for (int j = 0; j < colunas; j++) {
-            if (isupper(tabuleiro[i][j])) {
-                contadorBrancas++;
+            if (tabuleiro[i][j] == ' ') {
+                contadorLetras++;
                 if (inicio.linha == -1) {
                     inicio.linha = i;
                     inicio.coluna = j;
@@ -48,7 +48,7 @@ bool casasBrancasEstaoConectadas(char **tabuleiro, int linhas, int colunas) {
         }
     }
     
-    if (contadorBrancas == 0) return true;
+    if (contadorLetras == 0) return true;
     
     bool **visitado = malloc(linhas * sizeof(bool *));
     for (int i = 0; i < linhas; i++) {
@@ -73,7 +73,7 @@ bool casasBrancasEstaoConectadas(char **tabuleiro, int linhas, int colunas) {
             int novaColuna = atual.coluna + direcoes[i][1];
             
             if (novaLinha >= 0 && novaLinha < linhas && novaColuna >= 0 && novaColuna < colunas) {
-                if (!visitado[novaLinha][novaColuna] && isupper(tabuleiro[novaLinha][novaColuna])) {
+                if (!visitado[novaLinha][novaColuna] && tabuleiro[novaLinha][novaColuna] == ' ') {
                     visitado[novaLinha][novaColuna] = true;
                     fila[tras++] = (Posicao){novaLinha, novaColuna};
                     contadorConectadas++;
@@ -88,7 +88,7 @@ bool casasBrancasEstaoConectadas(char **tabuleiro, int linhas, int colunas) {
     free(visitado);
     free(fila);
     
-    return contadorConectadas == contadorBrancas;
+    return contadorConectadas == contadorLetras;
 }
 
 char leLetra(const char *mensagem) {
@@ -143,6 +143,14 @@ void preencherTabuleiro(char **tabuleiro, int linhas, int colunas) {
     }
 }
 
+void preencherMascara(char **mask, int linhas, int colunas){
+    for(int i = 0; i < linhas; i++){
+        for(int j = 0; j < colunas; j++){
+            mask[i][j] = (char)0x20; // whitespace
+        }
+    }
+}
+
 void copiarTabuleiro(char **src, char **dest, int linhas, int colunas) {
     for (int i = 0; i < linhas; i++) {
         for (int j = 0; j < colunas; j++) {
@@ -158,6 +166,7 @@ void salvarEstado(StateNode_t **current_node_ptr, int *history_counter) {
 
     StateNode_t *new_node = (StateNode_t *)malloc(sizeof(StateNode_t));
     new_node->tabuleiro = criarTabuleiro(linhas, colunas);
+    new_node -> mask = criarTabuleiro(linhas, colunas);
     new_node->linhas = linhas;
     new_node->colunas = colunas;
     new_node -> debuggable_id = current_node -> debuggable_id + 1;
@@ -165,6 +174,7 @@ void salvarEstado(StateNode_t **current_node_ptr, int *history_counter) {
 
     // Copy current board into new state
     copiarTabuleiro(current_node->tabuleiro, new_node->tabuleiro, linhas, colunas);
+    copiarTabuleiro(current_node->mask, new_node->mask, linhas, colunas);
 
     // Update the caller's pointer to point to the new node
     *current_node_ptr = new_node;
@@ -176,13 +186,14 @@ void desfazerUltimaJogada(StateNode_t **curr_node_ptr, int *history_counter) {
 
     StateNode_t *current_node = *curr_node_ptr;
 
-    printf("\nPrevious node pointer: %p\n", (void*)current_node -> prev_node);
+    //printf("\nPrevious node pointer: %p\n", (void*)current_node -> prev_node);
     
     if(current_node -> prev_node){
 
         StateNode_t *return_target = current_node -> prev_node;
         
         liberarTabuleiro(current_node -> tabuleiro, current_node -> linhas);
+        liberarTabuleiro(current_node -> mask, current_node -> linhas);
         free(current_node);
 
         *curr_node_ptr = return_target;
@@ -208,8 +219,6 @@ void destruirSavePoints(StateNode_t *curr_node){
     curr_node -> prev_node = NULL;
 
     while(iterator){
-        printf("Enter\n");
-        
         if(iterator -> tabuleiro){
             temp = iterator -> prev_node;
             liberarTabuleiro(iterator -> tabuleiro, iterator -> linhas);
@@ -221,7 +230,7 @@ void destruirSavePoints(StateNode_t *curr_node){
 
 void imprimirTabuleiro(StateNode_t *curr_node) {
 
-    char **tabuleiro = curr_node -> tabuleiro;
+    char **tabuleiro = aplicarMascara(curr_node);
     int linhas = curr_node -> linhas;
     int colunas = curr_node -> colunas;
 
@@ -242,12 +251,319 @@ void imprimirTabuleiro(StateNode_t *curr_node) {
     }
     printf("Há %d savepoints guardados\n\n", percorrerLista(curr_node));
     printf(ANSI_RESET_SCHEME);
+
+    liberarTabuleiro(tabuleiro, linhas);
 }
 
 void liberarTabuleiro(char **tabuleiro, int linhas) {
     for (int i = 0; i < linhas; i++) free(tabuleiro[i]);
     free(tabuleiro);
 }
+
+
+typedef struct solvenode{
+    StateNode_t *estado;
+    int *bitmap;
+    int jogada_bitmap;
+    int tamanho_bitmap;
+    struct solvenode *anterior_solve;
+} SolveNode_t;
+
+void liberarEstado(StateNode_t *state_node){
+    liberarTabuleiro(state_node -> tabuleiro, state_node -> linhas);
+    liberarTabuleiro(state_node -> mask, state_node -> linhas);
+    free(state_node);
+}
+
+int get_nextplay(int *bitmap, int curr_play, int size_map){
+
+    for(int i = curr_play + 1; i < size_map; i++){
+        if(bitmap[i] == 1) return i;
+    }
+
+    return -1;
+}
+
+int changeToPrevSolve(SolveNode_t **curr_solv_ptr){
+    SolveNode_t *current_solve = *curr_solv_ptr;
+    if(current_solve -> anterior_solve){
+        SolveNode_t *return_target = current_solve -> anterior_solve;
+        liberarEstado(current_solve -> estado);
+        
+        free(current_solve);
+        *curr_solv_ptr = return_target;
+        return 1;
+    }
+    return 0;
+}
+
+void changeSolveToNew(SolveNode_t **current_solve_ptr){
+
+    SolveNode_t *current_solve = *current_solve_ptr;
+
+    SolveNode_t *new_solve = (SolveNode_t *)malloc(sizeof(SolveNode_t));
+    new_solve -> anterior_solve = current_solve;
+    new_solve -> estado = current_solve -> estado;
+    new_solve -> jogada_bitmap = -1;
+    new_solve -> tamanho_bitmap = current_solve -> tamanho_bitmap;
+    new_solve -> bitmap = (int*)malloc(new_solve -> tamanho_bitmap * sizeof(int));
+
+    *current_solve_ptr = new_solve;
+
+}
+
+void resolver(StateNode_t *initial_state) {
+    // Pilha para backtracking
+    typedef struct {
+        StateNode_t *estado;
+        int *bitmap;
+        int jogada_atual;
+        int tamanho_bitmap;
+    } EstadoJogo;
+    
+    int linhas = initial_state->linhas;
+    int colunas = initial_state->colunas;
+    int tamanho_bitmap = linhas * colunas;
+    int dummy = 0;
+    
+    // Aloca memória para a pilha
+    EstadoJogo *pilha = malloc(10000 * sizeof(EstadoJogo)); // Tamanho arbitrário para a pilha
+    if (!pilha) {
+        printf(ERROR_MSG("Erro de alocação de memória!") "\n");
+        return;
+    }
+    
+    // Inicializa topo da pilha
+    int topo = 0;
+    
+    // Inicializa estado inicial
+    pilha[topo].estado = initial_state;
+    pilha[topo].bitmap = malloc(tamanho_bitmap * sizeof(int));
+    pilha[topo].jogada_atual = 0;
+    pilha[topo].tamanho_bitmap = tamanho_bitmap;
+    
+    // Analisa jogadas iniciais
+    analisar_jogadas(initial_state, pilha[topo].bitmap);
+    
+    printf("\n" SUCCESS_MSG("***** Iniciando resolução automática do jogo *****") "\n");
+    
+    // Loop principal de backtracking
+    while (topo >= 0) {
+        EstadoJogo *estado_atual = &pilha[topo];
+        int proxima_jogada = -1;
+        
+        // Encontra próxima jogada possível
+        for (int i = estado_atual->jogada_atual; i < tamanho_bitmap; i++) {
+            int linha = i / colunas;
+            int coluna = i % colunas;
+            
+            if (estado_atual->bitmap[i] == 1) {
+                proxima_jogada = i;
+                estado_atual->jogada_atual = i + 1; // Atualiza para a próxima posição
+                break;
+            }
+        }
+        
+        // Se não há mais jogadas disponíveis, verifica se o jogo está resolvido
+        if (proxima_jogada == -1) {
+            if (!verificar_violacoes(estado_atual->estado)) {
+                printf("\n" SUCCESS_MSG("***** Jogo resolvido com sucesso! *****") "\n");
+                imprimirTabuleiro(estado_atual->estado);
+                break;
+            } else {
+                // Backtrack - estamos em um beco sem saída
+                free(estado_atual->bitmap);
+                
+                // Se não é o nó raiz, desfaz a última jogada
+                if (topo > 0) {
+                    EstadoJogo *estado_anterior = &pilha[topo-1];
+                    desfazerUltimaJogada(&estado_anterior->estado, &dummy);
+                }
+                
+                topo--;
+                continue;
+            }
+        }
+        
+        // Calcula linha e coluna da próxima jogada
+        int linha = proxima_jogada / colunas;
+        int coluna = proxima_jogada % colunas;
+        
+        // Salva o estado atual para backtracking futuro
+        salvarEstado(&estado_atual->estado, &dummy);
+        
+        // Faz a jogada
+        printf("Tentando jogada: linha %d, coluna %d\n", linha, coluna);
+        if (modificarCasa(estado_atual->estado, linha, coluna, 'r')) {
+            // Verifica se o jogo foi resolvido após a jogada
+            if (!verificar_violacoes(estado_atual->estado)) {
+                printf("\n" SUCCESS_MSG("***** Jogo resolvido com sucesso! *****") "\n");
+                imprimirTabuleiro(estado_atual->estado);
+                break;
+            }
+            
+            // Cria novo estado na pilha
+            topo++;
+            pilha[topo].estado = estado_atual->estado;
+            pilha[topo].bitmap = malloc(tamanho_bitmap * sizeof(int));
+            if (!pilha[topo].bitmap) {
+                printf(ERROR_MSG("Erro de alocação de memória!") "\n");
+                return;
+            }
+            pilha[topo].jogada_atual = 0;
+            pilha[topo].tamanho_bitmap = tamanho_bitmap;
+            
+            // Analisa jogadas para o novo estado
+            analisar_jogadas(pilha[topo].estado, pilha[topo].bitmap);
+            
+            // Exibe o tabuleiro após a jogada
+            imprimirTabuleiro(pilha[topo].estado);
+        } else {
+            // Se a jogada falhou, desfaz
+            desfazerUltimaJogada(&estado_atual->estado, &dummy);
+        }
+        
+        // Limite de segurança para evitar pilha muito grande
+        if (topo >= 9999) {
+            printf(ERROR_MSG("Limite de profundidade de busca atingido!") "\n");
+            break;
+        }
+    }
+    
+    // Libera memória
+    for (int i = 0; i <= topo; i++) {
+        free(pilha[i].bitmap);
+    }
+    free(pilha);
+    
+    if (topo < 0) {
+        printf("\n" ERROR_MSG("***** Não foi possível resolver o jogo! *****") "\n");
+    }
+}
+
+/* void resolver(StateNode_t *initial_state) {
+    // Pilha para backtracking
+    typedef struct {
+        StateNode_t *estado;
+        int *bitmap;
+        int jogada_atual;
+        int tamanho_bitmap;
+    } EstadoJogo;
+    
+    int linhas = initial_state->linhas;
+    int colunas = initial_state->colunas;
+    int tamanho_bitmap = linhas * colunas;
+    int dummy = 0;
+    
+    // Aloca memória para a pilha
+    EstadoJogo *pilha = malloc(10000 * sizeof(EstadoJogo)); // Tamanho arbitrário para a pilha
+    if (!pilha) {
+        printf(ERROR_MSG("Erro de alocação de memória!") "\n");
+        return;
+    }
+    
+    // Inicializa topo da pilha
+    int topo = 0;
+    
+    // Inicializa estado inicial
+    pilha[topo].estado = initial_state;
+    pilha[topo].bitmap = malloc(tamanho_bitmap * sizeof(int));
+    pilha[topo].jogada_atual = 0;
+    pilha[topo].tamanho_bitmap = tamanho_bitmap;
+    
+    // Analisa jogadas iniciais
+    analisar_jogadas(initial_state, pilha[topo].bitmap);
+    
+    printf("\n" SUCCESS_MSG("***** Iniciando resolução automática do jogo *****") "\n");
+    
+    // Loop principal de backtracking
+    while (topo >= 0) {
+        EstadoJogo *estado_atual = &pilha[topo];
+        int jogadas_disponiveis = 0;
+        int proxima_jogada = -1;
+        
+        // Conta jogadas disponíveis e encontra próxima jogada
+        for (int i = estado_atual->jogada_atual; i < tamanho_bitmap; i++) {
+            int linha = i / colunas;
+            int coluna = i % colunas;
+            
+            if (estado_atual->bitmap[i] == 1 && 
+                estado_atual->estado->mask[linha][coluna] != '#') {
+                jogadas_disponiveis++;
+                if (proxima_jogada == -1) {
+                    proxima_jogada = i;
+                }
+            }
+        }
+        
+        // Se não há mais jogadas disponíveis, verifica se o jogo está resolvido
+        if (jogadas_disponiveis == 0 || proxima_jogada == -1) {
+            if (!verificar_violacoes(estado_atual->estado)) {
+                printf("\n" SUCCESS_MSG("***** Jogo resolvido com sucesso! *****") "\n");
+                imprimirTabuleiro(estado_atual->estado);
+                break;
+            } else {
+                // Backtrack - estamos em um beco sem saída
+                free(estado_atual->bitmap);
+                topo--;
+                continue;
+            }
+        }
+        
+        // Executa a próxima jogada
+        int linha = proxima_jogada / colunas;
+        int coluna = proxima_jogada % colunas;
+        
+        // Salva o estado atual para backtracking futuro
+        salvarEstado(&estado_atual->estado, &dummy);
+        
+        // Faz a jogada
+        printf("Tentando jogada: linha %d, coluna %d\n", linha, coluna);
+        if (modificarCasa(estado_atual->estado, linha, coluna, 'r')) {
+            // Atualiza jogada atual para não repetir
+            estado_atual->jogada_atual = proxima_jogada + 1;
+            
+            // Cria novo estado na pilha
+            topo++;
+            pilha[topo].estado = estado_atual->estado;
+            pilha[topo].bitmap = malloc(tamanho_bitmap * sizeof(int));
+            pilha[topo].jogada_atual = 0;
+            pilha[topo].tamanho_bitmap = tamanho_bitmap;
+            
+            // Analisa jogadas para o novo estado
+            analisar_jogadas(pilha[topo].estado, pilha[topo].bitmap);
+            
+            // Exibe o tabuleiro após a jogada
+            imprimirTabuleiro(pilha[topo].estado);
+            
+            // Verifica se o jogo foi resolvido
+            if (!verificar_violacoes(pilha[topo].estado)) {
+                printf("\n" SUCCESS_MSG("***** Jogo resolvido com sucesso! *****") "\n");
+                break;
+            }
+        } else {
+            // Se a jogada falhou, desfaz e tenta a próxima
+            desfazerUltimaJogada(&estado_atual->estado, &dummy);
+            estado_atual->bitmap[proxima_jogada] = 0; // Marca como tentada
+        }
+        
+        // Limite de segurança para evitar pilha muito grande
+        if (topo >= 999) {
+            printf(ERROR_MSG("Limite de profundidade de busca atingido!") "\n");
+            break;
+        }
+    }
+    
+    // Libera memória
+    for (int i = 0; i <= topo; i++) {
+        free(pilha[i].bitmap);
+    }
+    free(pilha);
+    
+    if (topo < 0) {
+        printf("\n" ERROR_MSG("***** Não foi possível resolver o jogo! *****") "\n");
+    }
+} */
 
 int lerApartirDoSave(StateNode_t *initial_state){
 
@@ -281,6 +597,8 @@ int lerApartirDoSave(StateNode_t *initial_state){
         return -1;
     }
 
+    printf("\n\n\n");
+
     int escolha = leInteiro("Escolha o numero do save a ser carregado (-1 para cancelar):");
 
     if(escolha == -1){
@@ -302,10 +620,17 @@ int lerApartirDoSave(StateNode_t *initial_state){
     int colunas = initial_state -> colunas;
 
     initial_state -> tabuleiro = criarTabuleiro(linhas, colunas);
+    initial_state -> mask = criarTabuleiro(linhas, colunas);
 
     for (int i = 0; i < linhas; i++) {
         for (int j = 0; j < colunas; j++) {
             initial_state -> tabuleiro[i][j] = fgetc(fp);
+        }
+        fgetc(fp);
+    }
+    for (int i = 0; i < linhas; i++) {
+        for(int j = 0; j < colunas; j++){
+            initial_state -> mask[i][j] = fgetc(fp);
         }
         fgetc(fp);
     }
@@ -329,30 +654,184 @@ void salvarTabuleiroParaFicheiro(StateNode_t* last_node) {
         }
         fprintf(fp, "\n");
     }
+    for(int i = 0; i < last_node -> linhas; i++){
+        for(int j = 0; j < last_node -> colunas; j++){
+            fprintf(fp, "%c", last_node -> mask[i][j]);
+        }
+        fprintf(fp, "\n");
+    }
     fclose(fp);
     printf("Jogo salvo com sucesso em 'saves/tabuleiro_salvo.txt'.\n");
 }
 
-void modificarCasa(char **tabuleiro, int linha, int coluna, char acao) {
+int modificarCasa(StateNode_t *current_node, int linha, int coluna, char acao) {
+
+    int count_hashC = 0;
+    int count_hashB = 0;
+    int count_hashE = 0;
+    int count_hashD = 0;
+
+    int linhas = current_node -> linhas;
+    int colunas = current_node -> colunas;
     
-    if (acao == 'b' && islower(tabuleiro[linha][coluna])) {
-        tabuleiro[linha][coluna] = toupper(tabuleiro[linha][coluna]);
-    } else if (acao == 'r') {
-        tabuleiro[linha][coluna] = '#';
+    if (acao == 'b'){
+        if(islower(current_node -> tabuleiro[linha][coluna])) {
+        current_node -> tabuleiro[linha][coluna] = toupper(current_node -> tabuleiro[linha][coluna]);
+        }
+        else if(isupper(current_node -> tabuleiro[linha][coluna])){
+            current_node -> tabuleiro[linha][coluna] = tolower(current_node -> tabuleiro[linha][coluna]);
+        }
+    }    
+    else if (acao == 'r') {
+
+        if(isupper(current_node -> tabuleiro[linha][coluna])){
+            printf(ERROR_MSG("Jogador tentou riscar casa branca ") "\n");
+            return 0;
+        }
+
+        if(verificar_casaunica(current_node, linha, coluna)){
+            printf(ERROR_MSG("Jogador tentou riscar casa unica") "\n");
+            return 0;
+        }
+       /*  if(verificar_casaunica(current_node, linha+1, coluna)){
+            printf(ERROR_MSG("Peca colateral em cima e unica, jogada invalida") "\n");
+            return 0;
+        }
+        if(verificar_casaunica(current_node, linha-1, coluna)){
+            printf(ERROR_MSG("Peca colateral em baixo e unica, jogada invalida") "\n");
+            return 0;
+        }
+        if(verificar_casaunica(current_node, linha, coluna+1)){
+            printf(ERROR_MSG("Peca colateral a direita e unica, jogada invalida") "\n");
+            return 0;
+        }
+        if(verificar_casaunica(current_node, linha, coluna-1)){
+            printf(ERROR_MSG("Peca colateral a esquerda e unica, jogada invalida") "\n");
+            return 0;
+        } */
+
+        if(linha + 1 < linhas && current_node -> mask[linha + 1][coluna] == '#') count_hashB++;
+        if(linha - 1 >= 0 && current_node -> mask[linha - 1][coluna] == '#') count_hashC++;
+        if(coluna + 1 < colunas && current_node -> mask[linha][coluna + 1] == '#') count_hashD++;
+        if(coluna - 1 >= 0 && current_node -> mask[linha][coluna - 1] == '#') count_hashE++;
+
+
+
+        if(current_node -> mask[linha][coluna] == ' '){
+            current_node -> mask[linha][coluna] = '#';
+    
+            if(!count_hashB && linha + 1 < linhas) current_node -> tabuleiro[linha+1][coluna] = toupper(current_node -> tabuleiro[linha+1][coluna]);
+            if(!count_hashC && linha - 1 >= 0) current_node -> tabuleiro[linha-1][coluna] = toupper(current_node -> tabuleiro[linha-1][coluna]);
+            if(!count_hashD && coluna + 1 < colunas) current_node -> tabuleiro[linha][coluna+1] = toupper(current_node -> tabuleiro[linha][coluna+1]);
+            if(!count_hashE && coluna - 1 >= 0) current_node -> tabuleiro[linha][coluna-1] = toupper(current_node -> tabuleiro[linha][coluna-1]);
+        }
+        else{
+            current_node -> mask[linha][coluna] = ' ';
+
+            if(!count_hashB && linha + 1 < linhas) current_node -> tabuleiro[linha+1][coluna] = tolower(current_node -> tabuleiro[linha+1][coluna]);
+            if(!count_hashC && linha - 1 >= 0) current_node -> tabuleiro[linha-1][coluna] = tolower(current_node -> tabuleiro[linha-1][coluna]);
+            if(!count_hashD && coluna + 1 < colunas) current_node -> tabuleiro[linha][coluna+1] = tolower(current_node -> tabuleiro[linha][coluna+1]);
+            if(!count_hashE && coluna - 1 >= 0) current_node -> tabuleiro[linha][coluna-1] = tolower(current_node -> tabuleiro[linha][coluna-1]);
+        }
     }
     else{
         printf("Ação inválida.\n");
+        return 0;
     }
+
+    if(!casasBrancasEstaoConectadas(current_node -> mask, current_node -> linhas, current_node -> colunas)){
+        printf(ERROR_MSG("Essa jogada e invalida." "\n"));
+        return 0;
+    }
+    else return 1;
+}
+
+char **aplicarMascara(StateNode_t *node){
+    char **temp = criarTabuleiro(node -> linhas, node -> colunas);
+
+    for(int i = 0; i < node -> linhas; i++){
+        for(int j = 0; j < node -> colunas; j++){
+            if(node -> mask[i][j] == '#'){
+                temp[i][j] = '#';
+            }
+            else temp[i][j] = node -> tabuleiro[i][j];
+        }
+    }
+
+    return temp;
+}
+
+void analisar_jogadas(StateNode_t *current_node, int* map){
+
+    int dummy = 0;
+    FILE* temp = tmpfile();
+    FILE* original_stdout = stdout;
+
+    for(int i = 0; i < current_node -> linhas; i++){
+        for(int j = 0; j < current_node -> colunas; j++){
+            salvarEstado(&current_node, &dummy);
+            stdout = temp;
+            if(modificarCasa(current_node, i, j, 'r')){
+                map[i + j] = 1;
+            }
+            else map[i + j] = 0;
+            /* if(!verificar_violacoes(current_node)){
+                map[i + j] = 1;
+            }
+            else{
+                map[i + j] = 0;
+            } */
+            stdout = original_stdout;
+            desfazerUltimaJogada(&current_node, &dummy);
+        }
+    }
+    fclose(temp);
+
+}
+
+bool verificar_casaunica(StateNode_t *current_node, int linha, int coluna){
+    
+    if(linha < 0 || linha >= current_node -> linhas) return false;
+    if(coluna < 0 || coluna >= current_node -> colunas) return false;
+    
+    char **tabuleiro = aplicarMascara(current_node);
+    if(tabuleiro[linha][coluna] == '#') {
+        liberarTabuleiro(tabuleiro, current_node -> linhas);
+        return false;
+    }
+
+    char letra = tolower(tabuleiro[linha][coluna]);
+    
+    for(int i = 0; i < current_node -> linhas; i++){
+        if(letra == tolower(tabuleiro[i][coluna]) && i != linha){
+            liberarTabuleiro(tabuleiro, current_node -> linhas);
+            return false;
+        } 
+    }
+    for(int j = 0; j < current_node -> colunas; j++){
+        if(letra == tolower(tabuleiro[linha][j]) && j != coluna){
+            liberarTabuleiro(tabuleiro, current_node -> linhas);
+            return false;
+        }
+    }
+
+    liberarTabuleiro(tabuleiro, current_node -> linhas);
+
+    return true;
 }
 
 bool verificar_violacoes(StateNode_t *current_node) {
 
-    char **tabuleiro = current_node -> tabuleiro;
+    char **tabuleiro = aplicarMascara(current_node);
+
+    /* char **tabuleiro = current_node -> tabuleiro; */
     int m = current_node -> linhas;
     int n = current_node -> colunas;
 
-    if(!casasBrancasEstaoConectadas(current_node -> tabuleiro, current_node -> linhas, current_node -> colunas)){
-        return 0;
+    if(!casasBrancasEstaoConectadas(current_node -> mask, current_node -> linhas, current_node -> colunas)){
+        printf(ERROR_MSG("Casas não estão conectadas") "\n");
+        liberarTabuleiro(tabuleiro, m);
+        return 1;
     }
 
     // Verificar se há peças repetidas nas linhas
@@ -361,6 +840,7 @@ bool verificar_violacoes(StateNode_t *current_node) {
             for (int k = j + 1; k < n; k++) {
                 if (tabuleiro[i][j] == tabuleiro[i][k] && tabuleiro[i][j] != '#') {
                     printf("Violação: Peça repetida na linha %d.\n", i);
+                    liberarTabuleiro(tabuleiro, m);
                     return true;
                 }
             }
@@ -373,6 +853,7 @@ bool verificar_violacoes(StateNode_t *current_node) {
             for (int k = i + 1; k < m; k++) {
                 if (tabuleiro[i][j] == tabuleiro[k][j] && tabuleiro[i][j] != '#') {
                     printf("Violação: Peça repetida na coluna %d.\n", j);
+                    liberarTabuleiro(tabuleiro, m);
                     return true;
                 }
             }
@@ -384,7 +865,7 @@ bool verificar_violacoes(StateNode_t *current_node) {
         for (int j = 0; j < n; j++) {
             if (tabuleiro[i][j] != '#') {
                 bool tem_vizinho = false;
-                
+
                 if (i > 0 && tabuleiro[i-1][j] != '#') tem_vizinho = true;
                 
                 if (i < m-1 && tabuleiro[i+1][j] != '#') tem_vizinho = true;
@@ -395,12 +876,15 @@ bool verificar_violacoes(StateNode_t *current_node) {
 
                 if (!tem_vizinho) {
                     printf("Violação: Peça isolada na posição (%d, %d).\n", i, j);
+                    liberarTabuleiro(tabuleiro, m);
                     return true;
                 }
             }
         }
     }
 
+    printf("\n" SUCCESS_MSG("Não existem violações") "\n");
+    liberarTabuleiro(tabuleiro, m);
     return false;
 }
 
@@ -421,7 +905,7 @@ int main(void){
     if(mkdir("saves", 0777) == -1){
         int error_code = errno;
         if(error_code == EEXIST){
-            printf(SUCCESS_MSG("Diretorio de save encontrado") "\n\n");
+            printf(SUCCESS_MSG("Diretorio de saves encontrado") "\n\n");
         }
         else{
             printf(ERROR_MSG("Algo de eu errado ao criar o diretório 'saves' std_error: %d") "\n", error_code);
@@ -485,8 +969,10 @@ int main(void){
         current_node -> linhas = linhas;
         current_node -> colunas = colunas;
         current_node -> tabuleiro = criarTabuleiro(linhas, colunas);
-        
+        current_node -> mask = criarTabuleiro(linhas, colunas);
+
         preencherTabuleiro(current_node -> tabuleiro, linhas, colunas);
+        preencherMascara(current_node -> mask, linhas, colunas);
     }
 
     current_node -> debuggable_id = 0;
@@ -520,7 +1006,22 @@ int main(void){
             return 0;
         } else if (entrada[0] == 'g' && entrada[1] == '\n') {
             salvarTabuleiroParaFicheiro(current_node);
-        } else if(entrada[0] == 'l' && entrada[1] == '\n') {
+        } else if(entrada[0] == 'D' && entrada[1] == '\n'){
+            int size = current_node -> linhas * current_node -> colunas;
+            int posicoes[size];
+            (void) analisar_jogadas(current_node, posicoes);
+            printf("Jogadas possiveis: ");
+            while(size--){
+                int linha = size/linhas;
+                int coluna = size%colunas;
+                if(posicoes[size] == 1 && current_node -> mask[linha][coluna] != '#'){
+                    printf("{%d, %d} -- ", linha, coluna);
+                }
+            }
+        } else if(entrada[0] == 'R' && entrada[1] == '\n'){
+            resolver(current_node);
+        }
+         else if(entrada[0] == 'l' && entrada[1] == '\n') {
             printf("Este comando iniciara uma nova sessao de jogo, tem a certeza que deseja proseguir? O jogo atual não sera salvo automaticamente.\n");
             char decisao = leLetra("(S/N...)?");
             if(decisao == 'S'){
@@ -552,7 +1053,9 @@ int main(void){
             if (lin >= 0 && lin < linhas && col >= 0 && col < colunas) {
                 salvarEstado(&current_node, &history_size);
                 //char **mod_tab = current_node -> tabuleiro;
-                modificarCasa(current_node -> tabuleiro, lin, col, cond);
+                if(!modificarCasa(current_node, lin, col, cond)){
+                    desfazerUltimaJogada(&current_node, &history_size);
+                }
             } else {
                 printf("Posição inválida!\n");
             }

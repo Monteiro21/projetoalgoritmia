@@ -1,0 +1,18 @@
+{
+    "files.associations": {
+        "*.c": "c",
+        "stdlib.h": "c",
+        "_stdlib.h": "c",
+        "_types.h": "c",
+        "cdefs.h": "c",
+        "unistd.h": "c",
+        "time.h": "c",
+        "errno.h": "c",
+        "types.h": "c",
+        "__locale": "c",
+        "cctype": "c",
+        "locale": "c",
+        "cstdio": "cpp",
+        "print": "cpp"
+    }
+}
